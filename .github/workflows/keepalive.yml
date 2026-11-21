@@ -3,43 +3,50 @@ name: keepalive
 # Mantem o site "dos 600 aos 1000" acordado no Render (plano free).
 #
 # O Render free dorme apos ~15 min sem nenhuma requisicao; a proxima visita
-# demora 30-60s pra acordar (cold start). Este workflow faz um ping leve a cada
-# 5 minutos pra manter a instancia quente.
+# demora 30-60s pra acordar (cold start).
 #
-# Fica num repositorio PUBLICO de proposito: em repositorios privados o GitHub
-# so da 2.000 minutos de Actions por mes, e um ping a cada 5 min gastaria ~8.640
-# minutos. Em repositorio publico os minutos de Actions sao ilimitados.
+# Por que NAO usamos um cron de "*/5": o agendador do GitHub e impreciso e
+# atrasa muito em frequencias altas (na pratica rodou só a cada 1-2 horas no
+# teste). Entao a estrategia e: um cron raro (a cada 4h) dispara UM job que fica
+# rodando ~5h40 pingando o site a cada 5 minutos por dentro. Como o job dura
+# mais que o intervalo do cron, os jobs se sobrepoem e nao ha brecha.
+#
+# Repositorio PUBLICO de proposito: em repo privado o GitHub so da 2.000 minutos
+# de Actions por mes; em repo publico os minutos sao ilimitados (e um job longo
+# como este gastaria muito).
 #
 # O job "heartbeat" faz um commit de 1 linha por dia: sem atividade no
 # repositorio, o GitHub desativa workflows agendados depois de 60 dias.
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # ping a cada 5 min
-    - cron: "0 6 * * *"     # heartbeat diario (mantem o repo "ativo")
+    - cron: "0 */4 * * *"   # aquecimento (dispara o job longo)
+    - cron: "30 6 * * *"    # heartbeat diario (mantem o repo "ativo")
   workflow_dispatch:
 
 permissions:
   contents: write
 
-concurrency:
-  group: keepalive
-  cancel-in-progress: false
-
 jobs:
-  ping:
+  warm:
+    # roda nos disparos de 4 em 4 horas e tambem no disparo manual
+    if: github.event_name != 'schedule' || github.event.schedule == '0 */4 * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 355
     steps:
-      - name: Acordar o site
+      - name: Pingar o site a cada 5 min por ~5h40
         run: |
-          for host in "https://dos600aos1000.onrender.com/api/config" "https://dos600aos1000.onrender.com/"; do
-            code=$(curl -sS -o /dev/null --max-time 110 -w "%{http_code}" "$host" || echo "000")
-            echo "ping $host -> $code"
+          end=$((SECONDS + 340*60))
+          while [ "$SECONDS" -lt "$end" ]; do
+            code=$(curl -sS -o /dev/null --max-time 90 -w "%{http_code}" \
+              "https://dos600aos1000.onrender.com/api/config" || echo "000")
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ping -> $code"
+            sleep 300
           done
+          echo "ciclo concluido"
 
   heartbeat:
-    if: github.event.schedule == '0 6 * * *'
+    if: github.event.schedule == '30 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
