@@ -5,11 +5,12 @@ name: keepalive
 # O Render free dorme apos ~15 min sem nenhuma requisicao; a proxima visita
 # demora 30-60s pra acordar (cold start).
 #
-# Por que NAO usamos um cron de "*/5": o agendador do GitHub e impreciso e
-# atrasa muito em frequencias altas (na pratica rodou só a cada 1-2 horas no
-# teste). Entao a estrategia e: um cron raro (a cada 4h) dispara UM job que fica
-# rodando ~5h40 pingando o site a cada 5 minutos por dentro. Como o job dura
-# mais que o intervalo do cron, os jobs se sobrepoem e nao ha brecha.
+# Estrategia: em vez de confiar num cron de "*/5" (o agendador do GitHub e
+# impreciso e atrasa muito em frequencias altas — no teste rodou de 1 em 1 hora),
+# um cron raro (a cada 2h) dispara UM job que fica ~5h30 pingando o site a cada
+# 5 minutos por dentro. Como o job (5h30) dura bem mais que o intervalo do cron
+# (2h), os jobs ficam sobrepostos: mesmo que um disparo do GitHub atrase ou seja
+# pulado, continua existindo job cobrindo o periodo.
 #
 # Repositorio PUBLICO de proposito: em repo privado o GitHub so da 2.000 minutos
 # de Actions por mes; em repo publico os minutos sao ilimitados (e um job longo
@@ -20,7 +21,7 @@ name: keepalive
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # aquecimento (dispara o job longo)
+    - cron: "0 */2 * * *"   # a cada 2h: dispara o job longo
     - cron: "30 6 * * *"    # heartbeat diario (mantem o repo "ativo")
   workflow_dispatch:
 
@@ -29,14 +30,14 @@ permissions:
 
 jobs:
   warm:
-    # roda nos disparos de 4 em 4 horas e tambem no disparo manual
-    if: github.event_name != 'schedule' || github.event.schedule == '0 */4 * * *'
+    # roda nos disparos de 2 em 2 horas e tambem no disparo manual
+    if: github.event_name != 'schedule' || github.event.schedule == '0 */2 * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 350
     steps:
-      - name: Pingar o site a cada 5 min por ~5h40
+      - name: Pingar o site a cada 5 min por ~5h30
         run: |
-          end=$((SECONDS + 340*60))
+          end=$((SECONDS + 330*60))
           while [ "$SECONDS" -lt "$end" ]; do
             code=$(curl -sS -o /dev/null --max-time 90 -w "%{http_code}" \
               "https://dos600aos1000.onrender.com/api/config" || echo "000")
